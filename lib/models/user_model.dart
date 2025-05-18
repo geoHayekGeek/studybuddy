@@ -20,8 +20,8 @@ class User {
 
   factory User.fromJson(Map<String, dynamic> json) {
     return User(
-      token: json['access_token'] ?? json['token'],
-      id: json['id'] as int?,
+      token: json['access_token'],  // Remove the null coalescing
+      id: json['user_id'] as int?,  // Changed from 'id' to 'user_id'
       username: json['username'] as String?,
       email: json['email'] as String?,
       createdAt: json['created_at'] != null

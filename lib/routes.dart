@@ -22,7 +22,8 @@ final routerProvider = Provider<GoRouter>((ref) {
     redirect: (BuildContext context, GoRouterState state) async {
       final authState = ref.read(authStateProvider);
       final documentsNotifier = ref.read(documentsProvider.notifier);
-      final hasDocuments = ref.read(documentsProvider).isNotEmpty;
+      final hasDocuments = documentsNotifier.isInitialLoadComplete
+          && ref.read(documentsProvider).isNotEmpty;
       final currentPath = state.uri.path;
       final isAuthRoute = _isAuthRoute(currentPath);
       final isLoggedIn = authState.isAuthenticated;
@@ -37,11 +38,24 @@ final routerProvider = Provider<GoRouter>((ref) {
       }
 
       // Handle authenticated users
+      if (!isLoggedIn && !isAuthRoute) {
+        return '/login';
+      }
+
+      // Handle authenticated users
       if (isLoggedIn) {
+        final hasLoaded = documentsNotifier.isInitialLoadComplete;
+
+        // Redirect from auth routes to home
         if (isAuthRoute) return '/home';
-        if (documentsNotifier.isInitialLoadComplete &&
-            !hasDocuments &&
-            !_isUploadRoute(currentPath)) {
+
+        // Redirect from upload screen if documents exist
+        if (_isUploadRoute(currentPath) && hasDocuments) {
+          return '/chat';
+        }
+
+        // Redirect to upload if no documents
+        if (hasLoaded && !hasDocuments && !_isUploadRoute(currentPath)) {
           return '/upload';
         }
       }

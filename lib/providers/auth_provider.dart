@@ -111,9 +111,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
     required String currentPassword,
     required String newPassword,
   }) async {
-    // 1️⃣ grab the existing user first
+    // Store existing user before clearing state
     final existingUser = state.user;
-    state = AuthState.loading();          // ➡️ clears out `user`
+    state = AuthState.loading();
 
     try {
       await _authApi.changePassword(
@@ -121,11 +121,21 @@ class AuthNotifier extends StateNotifier<AuthState> {
         newPassword: newPassword,
       );
 
-      // 2️⃣ restore it here
       if (existingUser == null) {
         throw Exception('No authenticated user in state.');
       }
-      state = AuthState.authenticated(existingUser);
+
+      // Reload documents after password change
+      await _ref.read(documentsProvider.notifier).loadDocuments(existingUser.id!);
+
+      // Update state with refreshed user data
+      final prefs = await SharedPreferences.getInstance();
+      final userJson = prefs.getString('user');
+      final updatedUser = userJson != null
+          ? User.fromJson(jsonDecode(userJson))
+          : existingUser;
+
+      state = AuthState.authenticated(updatedUser);
     } catch (e) {
       state = AuthState.error(e.toString());
       rethrow;

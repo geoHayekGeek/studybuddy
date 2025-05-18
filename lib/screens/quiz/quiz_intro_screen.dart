@@ -13,6 +13,10 @@ class QuizIntroScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Quiz Introduction'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
       body: Padding(
         padding: const EdgeInsets.all(20),

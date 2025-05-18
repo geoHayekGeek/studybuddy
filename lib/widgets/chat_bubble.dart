@@ -1,6 +1,7 @@
 // lib/widgets/chat_bubble.dart
 import 'package:flutter/material.dart';
 import '../../models/chat_model.dart';
+import 'formatted_text.dart';
 
 class ChatBubble extends StatelessWidget {
   final ChatMessage message;
@@ -19,9 +20,12 @@ class ChatBubble extends StatelessWidget {
           color: isUser ? Colors.blue : Colors.grey[300],
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Text(
-          message.content,  // Use the 'content' field of the message
-          style: TextStyle(color: isUser ? Colors.white : Colors.black),
+        child: FormattedText(
+          content: message.content,
+          defaultStyle: TextStyle(
+            color: isUser ? Colors.white : Colors.black,
+            fontSize: 16,
+          ),
         ),
       ),
     );

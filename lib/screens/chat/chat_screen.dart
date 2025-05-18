@@ -25,12 +25,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   bool _isSending = false;
   bool _isUploading = false;
   PlatformFile? _pickedFile;
+  bool _isGeneratingQuiz = false;
   int? _selectedDocumentId;
 
   List<PlatformFile> _pickedFiles = [];
 
-  // 1. Modified picker that uploads immediately
+  // Helper getter to check if any operation is in progress
+  bool get _isLoading => _isSending || _isUploading || _isGeneratingQuiz;
+
   Future<void> _pickFile() async {
+    if (_isLoading) return; // Prevent action if anything is loading
+
     try {
       setState(() => _isUploading = true);
       final result = await FilePicker.platform.pickFiles(
@@ -41,12 +46,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
       if (result == null || result.files.isEmpty) return;
 
-      // Upload all files sequentially
       for (final file in result.files) {
-        await _handleFileUpload(file);  // This now processes each file
+        await _handleFileUpload(file);
       }
 
-      // Only store successfully uploaded files
       setState(() => _pickedFiles = result.files);
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -57,36 +60,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
-// 2. Robust upload handler
   Future<void> _handleFileUpload(PlatformFile platformFile) async {
     try {
       final authState = ref.read(authStateProvider);
       final token = authState.user?.token;
       if (token == null) throw Exception('User not authenticated');
 
-      // Get file bytes
       final fileBytes = platformFile.bytes ?? await File(platformFile.path!).readAsBytes();
-      // Create multipart request
       var uri = Uri.parse('${ApiConstants.baseUrl}/documents/text/');
       var request = http.MultipartRequest('POST', uri);
-
-      // Add headers
       request.headers['Authorization'] = 'Bearer $token';
-
-      // Add form fields
       request.fields['title'] = platformFile.name;
-
-      // Add file
       request.files.add(http.MultipartFile.fromBytes(
-        'file',  // Changed from 'content' to 'file'
+        'file',
         fileBytes,
         filename: platformFile.name,
       ));
-
-      // Send request
       var response = await request.send();
 
-      // Check response
       if (response.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Document uploaded successfully!')),
@@ -115,20 +106,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _sendMessage() async {
-    if (_selectedDocumentId == null) { // Add null check
+    if (_isLoading) return; // Prevent action if anything is loading
+
+    if (_selectedDocumentId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select a document first')),
       );
       return;
     }
 
-    if (_messageController.text.trim().isEmpty || _isSending) return;
-
+    if (_messageController.text.trim().isEmpty) return;
     setState(() => _isSending = true);
 
     try {
       await ref.read(chatMessagesProvider.notifier).askQuestionAboutDocument(
-        _selectedDocumentId!, // Use selected document ID
+        _selectedDocumentId!,
         _messageController.text.trim(),
       );
       _messageController.clear();
@@ -142,7 +134,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _generateQuiz() async {
-    print("generate quiz clicked");
+    if (_isLoading) return;
+
     if (_selectedDocumentId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select a document first')),
@@ -150,19 +143,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       return;
     }
 
-    final authState = ref.read(authStateProvider);
-    // final userId = 4;
-    final userId = authState.user?.id;
-    if (userId == null) return;
+    setState(() => _isGeneratingQuiz = true);
 
     try {
       final quiz = await ref.read(quizListProvider.notifier)
-          .generateQuiz(_selectedDocumentId!, userId, numQuestions: 5);
+          .generateQuiz(_selectedDocumentId!, 4, numQuestions: 5); // Use selected ID
       context.go('/quiz-intro/${quiz.id}');
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error generating quiz: $e')),
       );
+    } finally {
+      setState(() => _isGeneratingQuiz = false);
     }
   }
 
@@ -174,7 +166,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       if (documents.isNotEmpty) {
         setState(() => _selectedDocumentId = documents.first.id);
       }
-      // Add listener to update selection when documents change
       ref.listen<List<Document>>(documentsProvider, (_, next) {
         if (next.isNotEmpty && _selectedDocumentId == null) {
           setState(() => _selectedDocumentId = next.first.id);
@@ -189,26 +180,52 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final hasDocument = documents.isNotEmpty;
     final chatMessages = ref.watch(chatMessagesProvider);
 
+    // Create a loading message based on current operation
+    String? loadingMessage;
+    if (_isUploading) loadingMessage = 'Uploading document...';
+    else if (_isSending) loadingMessage = 'Sending message...';
+    else if (_isGeneratingQuiz) loadingMessage = 'Generating quiz...';
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Study Buddy'),
-        actions: [
-          if (documents.isNotEmpty)
-            DropdownButton<int>(
+        backgroundColor: const Color(0xFF3461FD),
+        elevation: 4,
+        leading: const Padding(
+          padding: EdgeInsets.only(left: 12.0),
+          child: Icon(
+            Icons.psychology,
+            color: Colors.white,
+            size: 30,
+          ),
+        ),
+        centerTitle: true,
+        title: documents.isNotEmpty
+            ? SizedBox(
+          width: MediaQuery.of(context).size.width * 0.6, // Limit width to 60% of screen width
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<int>(
               value: _selectedDocumentId,
-              items: documents.map((doc) => DropdownMenuItem<int>(
-                value: doc.id,
-                child: Text(doc.title),
-              )).toList(),
-              onChanged: (value) => setState(() => _selectedDocumentId = value),
-              hint: const Text('Select Document'),
+              isExpanded: true, // Use maximum width
+              items: documents.map((doc) {
+                return DropdownMenuItem<int>(
+                  value: doc.id,
+                  child: Text(
+                    doc.title,
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                );
+              }).toList(),
+              onChanged: _isLoading ? null : (value) => setState(() => _selectedDocumentId = value),
+              dropdownColor: const Color(0xFF3461FD),
+              iconEnabledColor: Colors.white,
+              icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
             ),
-          // IconButton(
-          //   icon: const Icon(Icons.history),
-          //   onPressed: () => context.push('/chat-history'),
-          // ),
-          const UserMenu(),
-        ],
+          ),
+        )
+            : const SizedBox(),
+        actions: const [UserMenu()],
       ),
       body: hasDocument
           ? Column(
@@ -224,11 +241,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     subtitle: Text('${(file.size / 1024).toStringAsFixed(2)} KB'),
                     trailing: IconButton(
                       icon: const Icon(Icons.close),
-                      onPressed: () => setState(() => _pickedFiles.remove(file)),
+                      // Disable file removal when loading
+                      onPressed: _isLoading ? null : () => setState(() => _pickedFiles.remove(file)),
                     ),
                   ),
                 ),
               )).toList(),
+            ),
+          // Display loading indicator if any operation is in progress
+          if (_isLoading)
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(loadingMessage ?? 'Processing...'),
+                ],
+              ),
             ),
           Expanded(
             child: ListView.builder(
@@ -249,14 +284,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               children: [
                 IconButton(
                   icon: _isUploading
-                      ? const CircularProgressIndicator()
+                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Icon(Icons.attach_file),
-                  color: AppColors.primary,
-                  onPressed: _isUploading ? null : _pickFile,
+                  color: _isLoading && !_isUploading ? Colors.grey : AppColors.primary,
+                  onPressed: _isLoading ? null : _pickFile,
                 ),
                 Expanded(
                   child: TextField(
                     controller: _messageController,
+                    enabled: !_isLoading, // Disable text field when loading
                     decoration: InputDecoration(
                       hintText: 'Ask a question about the document...',
                       border: OutlineInputBorder(
@@ -267,19 +303,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         vertical: 10,
                       ),
                     ),
-                    onSubmitted: (_) => _sendMessage(),
+                    onSubmitted: _isLoading ? null : (_) => _sendMessage(),
                   ),
                 ),
                 const SizedBox(width: 10),
                 IconButton(
                   icon: _isSending
-                      ? const CircularProgressIndicator()
-                      : const Icon(Icons.send, color: AppColors.primary),
-                  onPressed: _sendMessage,
+                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.send),
+                  color: _isLoading && !_isSending ? Colors.grey : AppColors.primary,
+                  onPressed: _isLoading ? null : _sendMessage,
                 ),
                 IconButton(
-                  icon: const Icon(Icons.quiz, color: AppColors.primary),
-                  onPressed: _generateQuiz,
+                  icon: _isGeneratingQuiz
+                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.quiz),
+                  color: _isLoading && !_isGeneratingQuiz ? Colors.grey : AppColors.primary,
+                  onPressed: _isLoading ? null : _generateQuiz,
                 ),
               ],
             ),
@@ -302,17 +342,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ),
             const SizedBox(height: 24),
             ElevatedButton(
-              onPressed: _isUploading ? null : _pickFile,
+              onPressed: _isLoading ? null : _pickFile,
+              style: ElevatedButton.styleFrom(
+                disabledBackgroundColor: Colors.grey.shade300,
+              ),
               child: _isUploading
-                  ? const CircularProgressIndicator()
+                  ? const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2)
+              )
                   : const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
                 child: Text('Upload Document'),
               ),
             ),
-            if (_isUploading) ...[
+            if (_isLoading) ...[
               const SizedBox(height: 16),
-              const Text('Uploading document...'),
+              Text(loadingMessage ?? 'Processing...'),
             ],
             const SizedBox(height: 16),
             Text(

@@ -171,4 +171,10 @@ class DocumentsNotifier extends StateNotifier<List<Document>> {
       rethrow;
     }
   }
+
+  void clearDocuments() {
+    state = [];
+    _initialLoadComplete = false;
+  }
+
 }
